@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鏡頭與感測器成像匹配分析工具 v4.2 - 閱讀優化版</title>
+    <!-- 載入 React 18 核心與 DOM 管理 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- 載入 Babel 用於瀏覽器即時解析 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background-color: #f1f5f9; overflow-x: hidden; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .font-mono { font-family: 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace; }
+        #root:empty { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        // --- 內嵌式 SVG 圖示元件 (Title Case) ---
+        const IconInfo = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        );
+        const IconAlert = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        );
+        const IconCheck = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+        );
+        const IconCompass = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+        );
+        const IconRuler = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/><path d="m4.5 13.5 2 2"/></svg>
+        );
+        const IconLayout = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="21" y2="9"/></svg>
+        );
+        const IconTarget = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        );
+
+        const App = () => {
+            const [resH, setResH] = useState(2592);
+            const [resV, setResV] = useState(1944);
+            const [pixelSize, setPixelSize] = useState(2.0);
+            const [imageCircle, setImageCircle] = useState(6.0);
+            const [focalLength, setFocalLength] = useState(3.6);
+            const [distA, setDistA] = useState(1.0);
+            const [distB, setDistB] = useState(5.0);
+            const [plateW, setPlateW] = useState(0.36);
+            const [plateH, setPlateH] = useState(0.12);
+
+            const sensorW = useMemo(() => (resH * pixelSize) / 1000, [resH, pixelSize]);
+            const sensorH = useMemo(() => (resV * pixelSize) / 1000, [resV, pixelSize]);
+            const diagonal = useMemo(() => Math.sqrt(Math.pow(sensorW, 2) + Math.pow(sensorH, 2)), [sensorW, sensorH]);
+            const hasVignetting = diagonal > imageCircle;
+
+            const calculateFOV = (dimension, focal) => (focal <= 0) ? 0 : 2 * Math.atan(dimension / (2 * focal)) * (180 / Math.PI);
+            const fovH = useMemo(() => calculateFOV(sensorW, focalLength), [sensorW, focalLength]);
+            const fovV = useMemo(() => calculateFOV(sensorH, focalLength), [sensorH, focalLength]);
+            const fovD = useMemo(() => calculateFOV(diagonal, focalLength), [diagonal, focalLength]);
+
+            const getResults = (dist) => {
+                const distMM = dist * 1000;
+                const fovRadH = fovH * (Math.PI / 180);
+                const w = 2 * distMM * Math.tan(fovRadH / 2);
+                const h = 2 * distMM * Math.tan((fovV * Math.PI / 180) / 2);
+                const ppmH = resH / (w / 1000);
+                const ppmV = resV / (h / 1000);
+                return { sceneW: w, sceneH: h, ppmH, ppmV, platePixH: plateW * ppmH, platePixV: plateH * ppmV };
+            };
+
+            const resA = useMemo(() => getResults(distA), [fovH, fovV, resH, resV, distA, plateW, plateH]);
+            const resB = useMemo(() => getResults(distB), [fovH, fovV, resH, resV, distB, plateW, plateH]);
+
+            const canvasSize = 450;
+            const maxDimension = Math.max(sensorW, sensorH, imageCircle);
+            const scale = (canvasSize * 0.75) / maxDimension;
+            const centerX = canvasSize / 2;
+            const centerY = canvasSize / 2;
+
+            return (
+                <div className="flex flex-col lg:flex-row min-h-screen bg-slate-100 p-3 sm:p-4 lg:p-6 gap-4 sm:gap-6 font-sans text-slate-900 overflow-x-hidden">
+                    {/* 左側控制面板 */}
+                    <div className="w-full lg:w-[450px] bg-white rounded-xl shadow-xl p-5 sm:p-8 flex flex-col gap-5 sm:gap-6 h-auto">
+                        <div className="flex flex-col text-nowrap">
+                            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-1 italic border-l-8 border-blue-600 pl-4 tracking-tight">光學參數配置</h2>
+                            <p className="text-xs sm:text-sm text-slate-400 font-bold uppercase tracking-widest">Lens & Sensor Specification</p>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200">
+                                <label className="block text-base sm:text-lg font-black text-slate-800 mb-3 underline decoration-blue-500 underline-offset-4 text-nowrap">Sensor 解析度 (px)</label>
+                                <div className="grid grid-cols-2 gap-3 sm:gap-4 text-slate-700">
+                                    <div className="flex flex-col"><span className="text-[10px] sm:text-xs font-black opacity-60 block mb-1 uppercase text-nowrap">Width (H)</span><input type="number" value={resH} onChange={(e) => setResH(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-blue-500" /></div>
+                                    <div className="flex flex-col"><span className="text-[10px] sm:text-xs font-black opacity-60 block mb-1 uppercase text-nowrap">Height (V)</span><input type="number" value={resV} onChange={(e) => setResV(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-blue-500" /></div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-nowrap">
+                                <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200"><label className="block text-sm sm:text-base font-black text-slate-800 mb-2 underline decoration-blue-500 underline-offset-4">Pixel Size (μm)</label><input type="number" step="0.1" value={pixelSize} onChange={(e) => setPixelSize(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-blue-500" /></div>
+                                <div className="bg-blue-50 p-4 sm:p-5 rounded-xl border border-blue-200"><label className="block text-sm sm:text-base font-black text-blue-800 mb-2 underline decoration-blue-400 underline-offset-4 text-nowrap">焦距 f (mm)</label><input type="number" step="0.1" value={focalLength} onChange={(e) => setFocalLength(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-blue-300 rounded-lg outline-none font-mono text-base text-blue-700 font-black focus:border-blue-600" /></div>
+                            </div>
+                            <div className="p-4 sm:p-5 rounded-xl bg-blue-900 text-white shadow-lg space-y-3">
+                                <h3 className="text-xs sm:text-sm font-black text-blue-200 tracking-[0.1em] flex items-center gap-2 border-b border-blue-800 pb-2"><IconCompass size={18} /> Optical FOV</h3>
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                    <div><p className="text-[10px] sm:text-xs opacity-70 font-black uppercase mb-1">FOV(D)</p><p className="text-xl sm:text-2xl font-mono font-black text-blue-100">{fovD.toFixed(1)}°</p></div>
+                                    <div><p className="text-[10px] sm:text-xs opacity-70 font-black uppercase mb-1">FOV(H)</p><p className="text-xl sm:text-2xl font-mono font-black text-blue-100">{fovH.toFixed(1)}°</p></div>
+                                    <div><p className="text-[10px] sm:text-xs opacity-70 font-black uppercase mb-1">FOV(V)</p><p className="text-xl sm:text-2xl font-mono font-black text-blue-100">{fovV.toFixed(1)}°</p></div>
+                                </div>
+                            </div>
+                            <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 text-nowrap">
+                                <label className="block text-base sm:text-lg font-black text-slate-800 mb-2 underline decoration-blue-500 underline-offset-4">鏡頭成像圈直徑 (mm)</label>
+                                <input type="number" step="0.1" value={imageCircle} onChange={(e) => setImageCircle(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-blue-500" />
+                            </div>
+                            <div className={`p-4 sm:p-5 rounded-xl border-2 flex items-center gap-3 sm:gap-4 transition-all duration-300 ${hasVignetting ? 'bg-red-50 border-red-400 text-red-900 shadow-xl' : 'bg-green-50 border-green-300 text-green-900 shadow-md'}`}>
+                                {hasVignetting ? <IconAlert size={32} className="text-red-600 shrink-0" /> : <IconCheck size={32} className="text-green-600 shrink-0" />}
+                                <div className="flex-1 min-w-0 text-slate-900">
+                                    <p className="font-black text-lg sm:text-xl leading-tight mb-1">偵測到暗角風險</p>
+                                    <p className={`font-black tracking-tight leading-none ${hasVignetting ? 'text-xl sm:text-3xl text-red-700' : 'text-xs sm:text-sm text-green-700'}`}>{hasVignetting ? `超出範圍: ${(diagonal - imageCircle).toFixed(2)}mm` : '符合成像圈範圍'}</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-nowrap">
+                                <div className="bg-emerald-50 p-4 sm:p-5 rounded-xl border border-emerald-200 shadow-sm"><label className="block text-sm sm:text-base font-black text-emerald-900 mb-2 underline decoration-emerald-500 underline-offset-4 flex items-center gap-2"><IconRuler size={16} /> 物距 A (m)</label><input type="number" step="0.1" min="0.01" value={distA} onChange={(e) => setDistA(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-emerald-300 rounded-lg outline-none font-mono text-base text-emerald-800 font-black focus:border-emerald-600" /></div>
+                                <div className="bg-emerald-50 p-4 sm:p-5 rounded-xl border border-emerald-200 shadow-sm"><label className="block text-sm sm:text-base font-black text-emerald-900 mb-2 underline decoration-emerald-500 underline-offset-4 flex items-center gap-2"><IconRuler size={16} /> 物距 B (m)</label><input type="number" step="0.1" min="0.01" value={distB} onChange={(e) => setDistB(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-emerald-300 rounded-lg outline-none font-mono text-base text-emerald-800 font-black focus:border-emerald-600" /></div>
+                            </div>
+                            <div className="bg-slate-100 p-4 sm:p-5 rounded-xl border border-slate-300 shadow-inner">
+                                <label className="block text-base sm:text-lg font-black text-slate-800 mb-3 underline decoration-orange-500 underline-offset-4 text-nowrap">車牌尺寸 (License Plate Size, m)</label>
+                                <div className="grid grid-cols-2 gap-3 sm:gap-4 text-slate-700">
+                                    <div className="flex flex-col"><span className="text-[10px] sm:text-xs font-black opacity-60 block mb-1 uppercase">Length (m)</span><input type="number" step="0.01" value={plateW} onChange={(e) => setPlateW(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-orange-500" /></div>
+                                    <div className="flex flex-col"><span className="text-[10px] sm:text-xs font-black opacity-60 block mb-1 uppercase">Width (m)</span><input type="number" step="0.01" value={plateH} onChange={(e) => setPlateH(Number(e.target.value))} className="w-full p-2.5 sm:p-3 bg-white border-2 border-slate-300 rounded-lg outline-none font-mono text-base focus:border-orange-500" /></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 數據呈現區 */}
+                        <div className="space-y-6 pt-4 border-t border-slate-100 text-nowrap">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="p-4 sm:p-5 rounded-xl bg-emerald-900 text-white shadow-lg space-y-2 border-l-4 border-emerald-500"><h3 className="text-[10px] sm:text-[12px] font-black text-emerald-200 uppercase tracking-widest flex items-center gap-2 border-b border-emerald-800 pb-2"><IconLayout size={14} /> Scene Size A ({distA}m)</h3><div className="text-center py-1"><p className="text-lg sm:text-xl font-mono font-black mb-1 text-emerald-100">W: {(resA.sceneW / 1000).toFixed(2)}m</p><p className="text-lg sm:text-xl font-mono font-black text-emerald-100">H: {(resA.sceneH / 1000).toFixed(2)}m</p></div></div>
+                                <div className="p-4 sm:p-5 rounded-xl bg-emerald-800 text-white shadow-lg space-y-2 border-l-4 border-emerald-400"><h3 className="text-[10px] sm:text-[12px] font-black text-emerald-100 uppercase tracking-widest flex items-center gap-2 border-b border-emerald-700 pb-2"><IconLayout size={14} /> Scene Size B ({distB}m)</h3><div className="text-center py-1"><p className="text-lg sm:text-xl font-mono font-black mb-1 text-emerald-50">W: {(resB.sceneW / 1000).toFixed(2)}m</p><p className="text-lg sm:text-xl font-mono font-black text-emerald-50">H: {(resB.sceneH / 1000).toFixed(2)}m</p></div></div>
+                            </div>
+
+                            <div className="p-5 sm:p-6 rounded-xl bg-black text-white shadow-2xl space-y-4 border-l-8 border-slate-500">
+                                <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-2"><h3 className="text-[10px] sm:text-[12px] font-black text-white tracking-[0.1em] flex items-center gap-2"><IconTarget size={18} className="text-red-500" /> Pixels Per Meter A ({distA}m)</h3><span className="text-[8px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono italic uppercase">Res-Metric</span></div>
+                                <div className="grid grid-cols-2 gap-2 text-center py-1 border-b border-slate-800/50 mb-2">
+                                    <div className="border-r border-slate-800 px-1"><p className="text-[10px] sm:text-xs text-slate-400 font-black mb-1 uppercase text-nowrap">Horizontal</p><p className="text-3xl sm:text-4xl font-mono font-black text-white leading-none">{Math.round(resA.ppmH)}</p></div>
+                                    <div className="px-1"><p className="text-[10px] sm:text-xs text-slate-400 font-black mb-1 uppercase text-nowrap">Vertical</p><p className="text-3xl sm:text-4xl font-mono font-black text-white leading-none">{Math.round(resA.ppmV)}</p></div>
+                                </div>
+                                <div className="text-center bg-red-900/20 p-2 rounded"><p className="text-[10px] text-red-300 uppercase font-black tracking-widest">Plate Pixels (H x V)</p><p className="text-xl font-mono font-black text-red-400">{Math.round(resA.platePixH)} x {Math.round(resA.platePixV)} px</p></div>
+                            </div>
+
+                            <div className="p-5 sm:p-6 rounded-xl bg-slate-900 text-white shadow-2xl space-y-4 border-l-8 border-blue-500">
+                                <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-2"><h3 className="text-[10px] sm:text-[12px] font-black text-white tracking-[0.1em] flex items-center gap-2"><IconTarget size={18} className="text-blue-500" /> Pixels Per Meter B ({distB}m)</h3><span className="text-[8px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono italic uppercase">Res-Metric</span></div>
+                                <div className="grid grid-cols-2 gap-2 text-center py-1 border-b border-slate-800/50 mb-2">
+                                    <div className="border-r border-slate-800 px-1"><p className="text-[10px] sm:text-xs text-slate-400 font-black mb-1 uppercase text-nowrap">Horizontal</p><p className="text-3xl sm:text-4xl font-mono font-black text-white leading-none">{Math.round(resB.ppmH)}</p></div>
+                                    <div className="px-1"><p className="text-[10px] sm:text-xs text-slate-400 font-black mb-1 uppercase text-nowrap">Vertical</p><p className="text-3xl sm:text-4xl font-mono font-black text-white">{Math.round(resB.ppmV)}</p></div>
+                                </div>
+                                <div className="text-center bg-blue-900/20 p-2 rounded"><p className="text-[10px] text-blue-300 uppercase font-black tracking-widest">Plate Pixels (H x V)</p><p className="text-xl font-mono font-black text-blue-400">{Math.round(resB.platePixH)} x {Math.round(resB.platePixV)} px</p></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 右側視覺化區塊 */}
+                    <div className="flex-1 flex flex-col gap-6">
+                        {/* 1. 物理匹配圖 */}
+                        <div className="bg-slate-900 rounded-xl shadow-2xl p-4 sm:p-6 flex flex-col items-center justify-center overflow-hidden relative border border-slate-800 min-h-[480px]">
+                            <div className="w-full text-center mb-6 px-2 text-nowrap"><h2 className="text-2xl sm:text-3xl font-black text-white italic tracking-tighter border-b-2 border-slate-800 pb-4 inline-block max-w-full uppercase">Optical Matching System v4.2</h2></div>
+                            <div className="flex-1 w-full flex items-center justify-center">
+                                <svg viewBox={`0 0 ${canvasSize} ${canvasSize}`} className="w-full h-auto max-w-[450px] bg-black rounded-lg shadow-2xl border border-slate-800 overflow-visible text-slate-900 transition-all duration-300 text-nowrap">
+                                    <defs><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M 30 0 L 0 0 0 30" fill="none" stroke="#0f172a" strokeWidth="1.5"/></pattern></defs>
+                                    <rect width="100%" height="100%" fill="url(#grid)" />
+                                    <line x1="0" y1={centerY} x2={canvasSize} y2={centerY} stroke="#1e293b" strokeWidth="1" strokeDasharray="8,8" /><line x1={centerX} y1="0" x2={centerX} y2={canvasSize} stroke="#1e293b" strokeWidth="1" strokeDasharray="8,8" />
+                                    <circle cx={centerX} cy={centerY} r={(imageCircle * scale) / 2} fill="rgba(59, 130, 246, 0.08)" stroke="#3b82f6" strokeWidth="3" />
+                                    <text x={centerX} y={centerY - (imageCircle * scale) / 2 - 25} textAnchor="middle" fill="#60a5fa" className="font-black" style={{ fontSize: '16px' }}>Image Circle: Φ{imageCircle.toFixed(2)}mm</text>
+                                    <rect x={centerX - (sensorW * scale) / 2} y={centerY - (sensorH * scale) / 2} width={sensorW * scale} height={sensorH * scale} fill="rgba(255, 255, 255, 0.03)" stroke={hasVignetting ? "#f87171" : "#10b981"} strokeWidth="6" />
+                                    <text x={centerX} y={centerY + (imageCircle * scale) / 2 + 40} textAnchor="middle" fill={hasVignetting ? "#f87171" : "#34d399"} className="font-mono font-black text-nowrap" style={{ fontSize: '16px' }}>Sensor AA: {sensorW.toFixed(2)}x{sensorH.toFixed(2)}mm (Diag: {diagonal.toFixed(2)}mm)</text>
+                                </svg>
+                            </div>
+                        </div>
+
+                        {/* 2. 側視投影分析圖 */}
+                        <div className="bg-slate-900 rounded-xl shadow-2xl p-4 sm:p-6 flex flex-col items-center justify-center overflow-hidden border border-slate-800 min-h-[480px]">
+                            <div className="w-full text-center mb-6 px-2 text-nowrap"><h2 className="text-xl sm:text-2xl font-black text-blue-400 italic tracking-tighter border-b-2 border-slate-800 pb-2 inline-block uppercase text-nowrap">Analysis: Distance vs Coverage</h2></div>
+                            <div className="flex-1 w-full flex items-center justify-center">
+                                <svg viewBox="0 0 500 350" className="w-full h-auto max-w-[500px] bg-black rounded border border-slate-800 overflow-visible text-nowrap">
+                                    <line x1="50" y1="300" x2="450" y2="300" stroke="#334155" strokeWidth="2" /><text x="460" y="305" fill="#64748b" className="font-black text-[12px] uppercase tracking-tighter">Scene Width</text>
+                                    <line x1="250" y1="300" x2="250" y2="50" stroke="#334155" strokeWidth="1" strokeDasharray="4,2" /><text x="250" y="40" textAnchor="middle" fill="#64748b" className="font-black text-[12px] uppercase tracking-tighter">Distance (m)</text>
+                                    {(() => {
+                                        const fovRadH = fovH * (Math.PI / 180);
+                                        const yBottom = 300; const yTop = 50; const yDiff = yBottom - yTop;
+                                        const halfW = yDiff * Math.tan(fovRadH / 2) * 1.5;
+                                        const xLeft = 250 - halfW; const xRight = 250 + halfW;
+                                        const maxD = Math.max(distA, distB, 1);
+                                        const getY = (d) => 300 - (d / (maxD * 1.2)) * 250;
+                                        const getW = (d) => (300 - getY(d)) * Math.tan(fovRadH / 2) * 1.5;
+                                        const yA = getY(distA); const wA = getW(distA);
+                                        const yB = getY(distB); const wB = getW(distB);
+                                        return (
+                                            <g>
+                                                <path d={`M 250 300 L ${xLeft} ${yTop} L ${xRight} ${yTop} Z`} fill="rgba(34, 211, 238, 0.1)" stroke="#083344" strokeWidth="1" />
+                                                <line x1="250" y1="300" x2={xLeft} y2={yTop} stroke="#22d3ee" strokeWidth="2" strokeDasharray="5,4" opacity="0.8" />
+                                                <line x1="250" y1="300" x2={xRight} y2={yTop} stroke="#22d3ee" strokeWidth="2" strokeDasharray="5,4" opacity="0.8" />
+                                                <line x1={250 - wA} y1={yA} x2={250 + wA} y2={yA} stroke="#ef4444" strokeWidth="4" /><circle cx="250" cy={yA} r="6" fill="#ef4444" />
+                                                <text x={250 + wA + 12} y={yA + 6} fill="#ef4444" className="font-black text-[16px] drop-shadow-sm text-nowrap">A: {distA}m (W: {(resA.sceneW/1000).toFixed(1)}m, {Math.round(resA.ppmH)} Pixels Per Meter)</text>
+                                                <line x1={250 - wB} y1={yB} x2={250 + wB} y2={yB} stroke="#3b82f6" strokeWidth="4" /><circle cx="250" cy={yB} r="6" fill="#3b82f6" />
+                                                <text x={250 + wB + 12} y={yB + 6} fill="#3b82f6" className="font-black text-[16px] drop-shadow-sm text-nowrap">B: {distB}m (W: {(resB.sceneW/1000).toFixed(1)}m, {Math.round(resB.ppmH)} Pixels Per Meter)</text>
+                                                <g transform="translate(250, 300)"><circle r="8" fill="#083344" stroke="#22d3ee" strokeWidth="1" /><text y="35" textAnchor="middle" fill="#22d3ee" className="font-black text-[15px] italic underline text-nowrap">FOV(H): {fovH.toFixed(1)}°</text></g>
+                                            </g>
+                                        );
+                                    })()}
+                                </svg>
+                            </div>
+                        </div>
+
+                        {/* 3. 分析結果 & 方案建議 - 修改 "分析結果" 字體顏色為深色 */}
+                        <div className="w-full text-white space-y-6">
+                            <div className="text-base text-slate-200 w-full min-w-0">
+                                <div className="flex items-center gap-3 border-b-4 border-blue-700 pb-2 mb-4 text-nowrap">
+                                    <IconTarget size={24} className="text-blue-600" />
+                                    {/* 修改處：將標題改為深色以利閱讀 */}
+                                    <span className="font-black text-slate-900 text-xl sm:text-2xl uppercase italic tracking-tighter text-nowrap">分析結果</span>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="bg-black p-6 sm:p-10 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden text-slate-100">
+                                        <p className="font-black text-slate-300 underline mb-5 tracking-widest text-base sm:text-xl uppercase text-nowrap italic text-nowrap">辨識性能門檻參考 (LPR Standards)：</p>
+                                        <ul className="text-base sm:text-lg list-disc pl-6 sm:pl-8 space-y-3 sm:space-y-4 font-black leading-relaxed text-nowrap text-nowrap"><li>車牌偵測 (Detection): 60 - 100 Pixels Per Meter</li><li>車牌辨識 (Recognition): 150 - 250 Pixels Per Meter</li><li>高精度鑑定 (Identification): &gt; 250 Pixels Per Meter</li></ul>
+                                    </div>
+                                    <div className="bg-slate-800 p-6 sm:p-10 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden text-slate-100">
+                                        <p className="font-black text-blue-400 underline mb-5 tracking-widest text-base sm:text-xl uppercase italic text-nowrap">方案建議：</p>
+                                        <p className="text-base sm:text-lg mb-4 font-bold text-slate-300 italic text-nowrap">若目前性能低於門檻，建議優化方向：</p>
+                                        <ol className="list-decimal pl-6 sm:pl-8 text-base sm:text-lg text-slate-100 space-y-3 sm:space-y-4 leading-relaxed font-bold text-nowrap text-nowrap"><li>縮短拍攝距離 (Reduce Object Distance)</li><li>更換長焦鏡頭 (Increase Focal Length)</li><li>採用高解析感測器 (Upgrade Sensor Resolution)</li></ol>
+                                    </div>
+                                    <div className="mt-6 p-5 bg-red-100 border-l-8 border-red-600 text-[11px] sm:text-base text-red-900 font-black leading-relaxed shadow-lg">注意：Pixels Per Meter 計算是以理論場景寬度為基準。實際應用中需考量角度、光學畸變 (Distortion) 及環境光源導致的細節損耗。</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
